@@ -9,7 +9,9 @@ requests==2.31.0
 # Azure Blob Storage SDK
 azure-storage-blob==12.19.0
 
-# Data manipulation and analysis
+# Numeric and data manipulation libraries
+# Note: numpy must be installed before pandas to prevent compatibility issues
+numpy==1.24.3
 pandas==2.0.3
 
 # Snowflake connector for database operations
