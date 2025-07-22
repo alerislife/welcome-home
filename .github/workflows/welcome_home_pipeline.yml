@@ -46,6 +46,8 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     continue-on-error: true
+    outputs:
+      table_status: ${{ steps.output-statuses.outputs.table_status }}
     strategy:
       fail-fast: false  # Don't stop other tables if one fails
       matrix:
@@ -75,7 +77,8 @@ jobs:
           python -c "
           import sys
           import os
-          sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+          # Use current working directory instead of __file__
+          sys.path.insert(0, os.getcwd())
           
           from main import process_table
           from utils.config_utils import load_config
@@ -99,6 +102,18 @@ jobs:
           name: api-blob-logs-${{ matrix.table }}
           path: welcome_home_pipeline_*.log
           retention-days: 7
+          
+      # Set job status for each table
+      - id: set-status
+        if: always()
+        run: |
+          echo "status=${{ job.status }}" >> $GITHUB_OUTPUT
+      
+      # Output statuses of all tables at the end of the matrix
+      - id: output-statuses
+        if: always() && matrix.table == fromJson(needs.setup.outputs.tables)[0]
+        run: |
+          echo "table_status='{"${{ matrix.table }}": "${{ steps.set-status.outputs.status }}"}' " >> $GITHUB_OUTPUT
 
   # Snowflake Loading Steps  
   snowflake_load:
@@ -125,7 +140,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Load ${{ matrix.table }} from Azure Blob to Snowflake
-        if: ${{ github.event.inputs.step_type != 'api_blob_only' }}
+        # Only run if step_type isn't api_blob_only AND the api_blob_upload job for this table succeeded
+        if: ${{ github.event.inputs.step_type != 'api_blob_only' && fromJson(needs.api_blob_upload.outputs.table_status)[matrix.table] == 'success' }}
         env:
           WELCOME_HOME_API: ${{ secrets.WELCOME_HOME_API }}
           AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
@@ -134,7 +150,8 @@ jobs:
           python -c "
           import sys
           import os
-          sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+          # Use current working directory instead of __file__
+          sys.path.insert(0, os.getcwd())
           
           from main import process_table
           from utils.config_utils import load_config
