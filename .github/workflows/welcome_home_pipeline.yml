@@ -48,10 +48,10 @@ jobs:
     continue-on-error: true
     outputs:
       # Each table's status will be output separately with table name as key
-      Prospects_status: ${{ steps.output-statuses-Prospects.outputs.status }}
-      Residents_status: ${{ steps.output-statuses-Residents.outputs.status }}
-      Activities_status: ${{ steps.output-statuses-Activities.outputs.status }}
-      DepositTransactions_status: ${{ steps.output-statuses-DepositTransactions.outputs.status }}
+      Prospects_status: ${{ steps.output-statuses.outputs.Prospects_status }}
+      Residents_status: ${{ steps.output-statuses.outputs.Residents_status }}
+      Activities_status: ${{ steps.output-statuses.outputs.Activities_status }}
+      DepositTransactions_status: ${{ steps.output-statuses.outputs.DepositTransactions_status }}
     strategy:
       fail-fast: false  # Don't stop other tables if one fails
       matrix:
@@ -108,10 +108,10 @@ jobs:
           retention-days: 7
           
       # Set and output individual job status for each table
-      - id: output-statuses-${{ matrix.table }}
+      - id: output-statuses
         if: always()
         run: |
-          echo "status=${{ job.status }}" >> $GITHUB_OUTPUT
+          echo "${{ matrix.table }}_status=${{ job.status }}" >> $GITHUB_OUTPUT
 
   # Snowflake Loading Steps  
   snowflake_load:
@@ -139,7 +139,7 @@ jobs:
 
       - name: Load ${{ matrix.table }} from Azure Blob to Snowflake
         # Only run if step_type isn't api_blob_only AND the api_blob_upload job for this table succeeded
-        if: ${{ github.event.inputs.step_type != 'api_blob_only' && needs.api_blob_upload.outputs[format('{0}_status', matrix.table)] == 'success' }}
+        if: ${{ github.event.inputs.step_type != 'api_blob_only' && needs.api_blob_upload.outputs[matrix.table + '_status'] == 'success' }}
         env:
           WELCOME_HOME_API: ${{ secrets.WELCOME_HOME_API }}
           AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
