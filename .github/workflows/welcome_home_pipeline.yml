@@ -1,0 +1,179 @@
+name: Welcome Home Pipeline
+
+on:
+  schedule:
+    # Run daily at 00:15 EST (05:15 UTC)
+    - cron: '15 5 * * *'
+  workflow_dispatch:
+    # Allow manual triggering with optional table selection
+    inputs:
+      tables:
+        description: 'Comma-separated list of tables to process (leave empty for all)'
+        required: false
+        type: string
+      step_type:
+        description: 'Step type to run'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - 'both'
+          - 'api_blob_only'
+          - 'snowflake_only'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      tables: ${{ steps.get-tables.outputs.tables }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Get tables to process
+        id: get-tables
+        run: |
+          if [ "${{ github.event.inputs.tables }}" != "" ]; then
+            # Manual trigger with specific tables
+            echo "tables=[\"$(echo '${{ github.event.inputs.tables }}' | sed 's/,/\",\"/g')\"]"
+          else
+            # Default tables from main.py (active ones)
+            echo "tables=[\"Prospects\",\"Residents\",\"Activities\",\"DepositTransactions\"]"
+          fi >> $GITHUB_OUTPUT
+
+  # API Download and Blob Upload Steps
+  api_blob_upload:
+    needs: setup
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false  # Don't stop other tables if one fails
+      matrix:
+        table: ${{ fromJson(needs.setup.outputs.tables) }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download ${{ matrix.table }} from API and upload to Azure Blob
+        if: ${{ github.event.inputs.step_type != 'snowflake_only' }}
+        env:
+          WELCOME_HOME_API: ${{ secrets.WELCOME_HOME_API }}
+          AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+        run: |
+          python -c "
+          import sys
+          import os
+          sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+          
+          from main import process_table
+          from utils.config_utils import load_config
+          
+          config = load_config()
+          
+          # Only run steps 1 and 2 (API download and blob upload)
+          success = process_table('${{ matrix.table }}', config, snowflake_load=False)
+          
+          if not success:
+              print('Failed to process ${{ matrix.table }} - API/Blob step')
+              sys.exit(1)
+          else:
+              print('Successfully processed ${{ matrix.table }} - API/Blob step')
+          "
+
+      - name: Upload API/Blob logs for ${{ matrix.table }}
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-blob-logs-${{ matrix.table }}
+          path: welcome_home_pipeline_*.log
+          retention-days: 7
+
+  # Snowflake Loading Steps  
+  snowflake_load:
+    needs: [setup, api_blob_upload]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false  # Don't stop other tables if one fails
+      matrix:
+        table: ${{ fromJson(needs.setup.outputs.tables) }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Load ${{ matrix.table }} from Azure Blob to Snowflake
+        if: ${{ github.event.inputs.step_type != 'api_blob_only' }}
+        env:
+          WELCOME_HOME_API: ${{ secrets.WELCOME_HOME_API }}
+          AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+        run: |
+          python -c "
+          import sys
+          import os
+          sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+          
+          from main import process_table
+          from utils.config_utils import load_config
+          
+          config = load_config()
+          
+          # Only run step 3 (Snowflake loading)
+          success = process_table('${{ matrix.table }}', config, api_download=False, blob_upload=False)
+          
+          if not success:
+              print('Failed to process ${{ matrix.table }} - Snowflake step')
+              sys.exit(1)
+          else:
+              print('Successfully processed ${{ matrix.table }} - Snowflake step')
+          "
+
+      - name: Upload Snowflake logs for ${{ matrix.table }}
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snowflake-logs-${{ matrix.table }}
+          path: welcome_home_pipeline_*.log
+          retention-days: 7
+
+  # Summary job to report overall status
+  summary:
+    needs: [api_blob_upload, snowflake_load]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Report Pipeline Status
+        run: |
+          echo "=== Welcome Home Pipeline Summary ==="
+          echo "API/Blob Upload Jobs Status: ${{ needs.api_blob_upload.result }}"
+          echo "Snowflake Load Jobs Status: ${{ needs.snowflake_load.result }}"
+          
+          if [[ "${{ needs.api_blob_upload.result }}" == "failure" ]] || [[ "${{ needs.snowflake_load.result }}" == "failure" ]]; then
+            echo "⚠️ Some steps failed. Check individual job logs for details."
+            echo "💡 You can re-run failed steps using workflow_dispatch with specific tables."
+          else
+            echo "✅ All pipeline steps completed successfully!"
+          fi

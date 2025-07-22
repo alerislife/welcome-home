@@ -1,0 +1,16 @@
+# Welcome Home Data Export Pipeline Dependencies
+
+# Environment variable management
+python-dotenv==1.0.0
+
+# HTTP requests for API communication
+requests==2.31.0
+
+# Azure Blob Storage SDK
+azure-storage-blob==12.19.0
+
+# Data manipulation and analysis
+pandas==2.0.3
+
+# Snowflake connector for database operations
+snowflake-connector-python==3.7.0
