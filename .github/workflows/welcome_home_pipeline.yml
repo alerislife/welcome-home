@@ -47,7 +47,11 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     outputs:
-      table_status: ${{ steps.output-statuses.outputs.table_status }}
+      # Each table's status will be output separately with table name as key
+      Prospects_status: ${{ steps.output-statuses-Prospects.outputs.status }}
+      Residents_status: ${{ steps.output-statuses-Residents.outputs.status }}
+      Activities_status: ${{ steps.output-statuses-Activities.outputs.status }}
+      DepositTransactions_status: ${{ steps.output-statuses-DepositTransactions.outputs.status }}
     strategy:
       fail-fast: false  # Don't stop other tables if one fails
       matrix:
@@ -103,17 +107,11 @@ jobs:
           path: welcome_home_pipeline_*.log
           retention-days: 7
           
-      # Set job status for each table
-      - id: set-status
+      # Set and output individual job status for each table
+      - id: output-statuses-${{ matrix.table }}
         if: always()
         run: |
           echo "status=${{ job.status }}" >> $GITHUB_OUTPUT
-      
-      # Output statuses of all tables at the end of the matrix
-      - id: output-statuses
-        if: always() && matrix.table == fromJson(needs.setup.outputs.tables)[0]
-        run: |
-          echo "table_status='{"${{ matrix.table }}": "${{ steps.set-status.outputs.status }}"}' " >> $GITHUB_OUTPUT
 
   # Snowflake Loading Steps  
   snowflake_load:
@@ -141,7 +139,7 @@ jobs:
 
       - name: Load ${{ matrix.table }} from Azure Blob to Snowflake
         # Only run if step_type isn't api_blob_only AND the api_blob_upload job for this table succeeded
-        if: ${{ github.event.inputs.step_type != 'api_blob_only' && fromJson(needs.api_blob_upload.outputs.table_status)[matrix.table] == 'success' }}
+        if: ${{ github.event.inputs.step_type != 'api_blob_only' && needs.api_blob_upload.outputs[format('{0}_status', matrix.table)] == 'success' }}
         env:
           WELCOME_HOME_API: ${{ secrets.WELCOME_HOME_API }}
           AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
