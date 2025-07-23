@@ -24,15 +24,12 @@ on:
 
 jobs:
   process-table:
-    # This 'if' condition fixes the workflow.
-    # The job will only run if the input is empty OR if the input string contains the matrix table name.
-    if: ${{ github.event.inputs.tables == '' || contains(github.event.inputs.tables, matrix.table) }}
+    # The 'if' condition was removed from here.
     runs-on: ubuntu-latest
     continue-on-error: true
     strategy:
-      fail-fast: false # Don't stop other tables if one fails
+      fail-fast: false
       matrix:
-        # The matrix is now a static list of all possible tables.
         table: ["Prospects", "Residents", "Activities", "DepositTransactions"]
 
     steps:
@@ -51,7 +48,8 @@ jobs:
 
       - name: Step 1 - Download from API and Upload to Azure Blob
         id: api_blob
-        if: ${{ github.event.inputs.step_type != 'snowflake_only' }}
+        # The 'if' condition is now on the step, where the 'matrix' context is available.
+        if: ${{ (github.event.inputs.tables == '' || contains(github.event.inputs.tables, matrix.table)) && github.event.inputs.step_type != 'snowflake_only' }}
         env:
           WELCOME_HOME_API_KEY: ${{ secrets.WELCOME_HOME_API_KEY }}
           AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
@@ -63,7 +61,6 @@ jobs:
           from main import process_table
           from utils.config_utils import load_config
           config = load_config('config.ini')
-          # Only run API download and blob upload
           success = process_table('${{ matrix.table }}', config, snowflake_load=False)
           if not success:
               sys.exit(1)
@@ -71,10 +68,8 @@ jobs:
 
       - name: Step 2 - Load from Azure Blob to Snowflake
         id: snowflake
-        # This step will only run if:
-        # 1. The workflow is not set to 'api_blob_only'.
-        # 2. The previous 'api_blob' step was successful OR the workflow is set to 'snowflake_only'.
-        if: ${{ github.event.inputs.step_type != 'api_blob_only' && (steps.api_blob.outcome == 'success' || github.event.inputs.step_type == 'snowflake_only') }}
+        # The 'if' condition is now on the step, combined with the original step logic.
+        if: ${{ (github.event.inputs.tables == '' || contains(github.event.inputs.tables, matrix.table)) && github.event.inputs.step_type != 'api_blob_only' && (steps.api_blob.outcome == 'success' || github.event.inputs.step_type == 'snowflake_only') }}
         env:
           WELCOME_HOME_API_KEY: ${{ secrets.WELCOME_HOME_API_KEY }}
           AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
@@ -86,7 +81,6 @@ jobs:
           from main import process_table
           from utils.config_utils import load_config
           config = load_config('config.ini')
-          # Only run Snowflake loading
           success = process_table('${{ matrix.table }}', config, api_download=False, blob_upload=False)
           if not success:
               sys.exit(1)
