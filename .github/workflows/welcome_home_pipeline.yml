@@ -24,13 +24,16 @@ on:
 
 jobs:
   process-table:
+    # This 'if' condition fixes the workflow.
+    # The job will only run if the input is empty OR if the input string contains the matrix table name.
+    if: ${{ github.event.inputs.tables == '' || contains(github.event.inputs.tables, matrix.table) }}
     runs-on: ubuntu-latest
     continue-on-error: true
     strategy:
       fail-fast: false # Don't stop other tables if one fails
       matrix:
-        # If input is empty, use all tables. Otherwise, split the comma-separated string.
-        table: ${{ github.event.inputs.tables == '' && fromJSON('["Prospects", "Residents", "Activities", "DepositTransactions"]') || split(github.event.inputs.tables, ',') }}
+        # The matrix is now a static list of all possible tables.
+        table: ["Prospects", "Residents", "Activities", "DepositTransactions"]
 
     steps:
       - name: Checkout repository
