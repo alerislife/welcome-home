@@ -61,7 +61,7 @@ jobs:
           from main import api_download_and_upload
           from utils.config_utils import load_config
           config = load_config('config.ini')
-          success, _ = api_download_and_upload('${{ matrix.table }}', config)
+          success = api_download_and_upload('${{ matrix.table }}', config)
           if not success:
               sys.exit(1)
           "
