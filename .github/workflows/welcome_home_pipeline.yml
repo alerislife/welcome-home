@@ -58,10 +58,10 @@ jobs:
           python -c "
           import sys, os
           sys.path.insert(0, os.getcwd())
-          from main import process_table
+          from main import api_download_and_upload
           from utils.config_utils import load_config
           config = load_config('config.ini')
-          success = process_table('${{ matrix.table }}', config, snowflake_load=False)
+          success, _ = api_download_and_upload('${{ matrix.table }}', config)
           if not success:
               sys.exit(1)
           "
@@ -78,10 +78,10 @@ jobs:
           python -c "
           import sys, os
           sys.path.insert(0, os.getcwd())
-          from main import process_table
+          from main import snowflake_load
           from utils.config_utils import load_config
           config = load_config('config.ini')
-          success = process_table('${{ matrix.table }}', config, api_download=False, blob_upload=False)
+          success = snowflake_load('${{ matrix.table }}', config)
           if not success:
               sys.exit(1)
           "
