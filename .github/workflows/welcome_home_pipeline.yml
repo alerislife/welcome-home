@@ -8,9 +8,10 @@ on:
     # Allow manual triggering with optional table selection
     inputs:
       tables:
-        description: 'Comma-separated list of tables to process (leave empty for all)'
+        description: 'Comma-separated list of tables to process (e.g., Prospects,Activities). Leave empty for all.'
         required: false
         type: string
+        default: ''
       step_type:
         description: 'Step type to run'
         required: false
@@ -28,7 +29,8 @@ jobs:
     strategy:
       fail-fast: false # Don't stop other tables if one fails
       matrix:
-        table: ["Prospects", "Residents", "Activities", "DepositTransactions"]
+        # If input is empty, use all tables. Otherwise, split the comma-separated string.
+        table: ${{ github.event.inputs.tables == '' && fromJSON('["Prospects", "Residents", "Activities", "DepositTransactions"]') || split(github.event.inputs.tables, ',') }}
 
     steps:
       - name: Checkout repository

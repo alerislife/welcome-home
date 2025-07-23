@@ -6,7 +6,6 @@ with support for paginated responses.
 
 import logging
 import requests
-import tempfile
 import os
 import re
 from typing import Optional
@@ -14,7 +13,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def download_table_csv(table_name: str, api_key: str, temp_dir: str) -> Optional[str]:
+def download_table_csv(table_name: str, api_key: str, temp_dir: str, records_per_page=10000) -> Optional[str]:
     """
     Download CSV data for a specific table from the Welcome Home API.
     
@@ -28,7 +27,7 @@ def download_table_csv(table_name: str, api_key: str, temp_dir: str) -> Optional
     Returns:
         Optional[str]: Path to the downloaded CSV file, or None if failed
     """
-    base_url = f"https://crm.welcomehomesoftware.com/api/exports/community/all/table/{table_name}"
+    base_url = f"https://crm.welcomehomesoftware.com/api/exports/community/all/table/{table_name}?limit={records_per_page}"
     
     headers = {
         'Authorization': f'Bearer {api_key}',
