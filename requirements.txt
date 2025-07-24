@@ -12,7 +12,8 @@ numpy
 pandas
 
 # Snowflake connector for database operations
-snowflake-connector-python
+# Include pandas extra to support pandas_tools
+snowflake-connector-python[pandas]
 
 # Timezone handling
 pytz
