@@ -17,7 +17,6 @@ jobs:
   process-table:
     # The 'if' condition was removed from here.
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
