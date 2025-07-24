@@ -29,7 +29,6 @@ logging.basicConfig(
 # Snowflake connection details
 SNOWFLAKE_ACCOUNT = "naa26543.east-us-2.azure"
 SNOWFLAKE_USER = "svc_etl"
-# SNOWFLAKE_PASSWORD="oB!nF5L7$h3ED?NRDh=="
 SNOWFLAKE_PASSWORD = os.getenv("SNOWFLAKE_PASSWORD")
 SNOWFLAKE_WAREHOUSE = "compute_wh"
 SNOWFLAKE_DATABASE = "raw"
@@ -37,7 +36,6 @@ SNOWFLAKE_SCHEMA = "welcome_home"
 
 # WelcomeHome API details
 API_BASE_URL = "https://crm.welcomehomesoftware.com/api/exports/community/all/table"
-# API_TOKEN = "UuLdq9P2iVkeLgDtfVGBe8odtc4xEs4Q"
 API_TOKEN = os.getenv("WELCOME_HOME_API_KEY") # Assuming you have a token
 TABLES_TO_PROCESS = [
     "Organizations",
