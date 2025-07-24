@@ -1,18 +1,18 @@
 # Welcome Home Data Export Pipeline Dependencies
 
 # Environment variable management
-python-dotenv==1.0.0
+python-dotenv
 
 # HTTP requests for API communication
-requests==2.31.0
-
-# Azure Blob Storage SDK
-azure-storage-blob==12.19.0
+requests
 
 # Numeric and data manipulation libraries
 # Note: numpy must be installed before pandas to prevent compatibility issues
-numpy==1.24.3
-pandas==2.0.3
+numpy
+pandas
 
 # Snowflake connector for database operations
-snowflake-connector-python==3.7.0
+snowflake-connector-python
+
+# Timezone handling
+pytz

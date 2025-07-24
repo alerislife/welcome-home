@@ -1,280 +1,261 @@
-#!/usr/bin/env python3
-"""
-Welcome Home Data Export Pipeline
-
-This script orchestrates the process of:
-1. Query API endpoint and download CSV to temporary location
-2. Upload CSV to blob storage from temporary location
-3. Use SQL to load table into Snowflake from stage
-
-Usage:
-    python main.py
-"""
-
-import logging
 import os
+import re
+import requests
+import snowflake.connector
+from datetime import datetime
+import pandas as pd
+from snowflake.connector.pandas_tools import write_pandas
+from dotenv import load_dotenv
+import logging
+import pytz
+import pandas as pd
+from io import StringIO
 import sys
-import tempfile
-from pathlib import Path
-from typing import Dict
+import argparse
 
-# Add the current directory to the Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Load environment variables from .env file
+load_dotenv()
 
-from utils.config_utils import load_config
-from utils.azure_utils import upload_to_azure_blob
-from utils.wh_api_utils import download_table_csv
-from utils.snowflake_utils import load_data_to_snowflake
-
-# Set up logging
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler()
     ]
 )
 
-logger = logging.getLogger(__name__)
+# --- Constants ---
+# Snowflake connection details
+SNOWFLAKE_ACCOUNT = "naa26543.east-us-2.azure"
+SNOWFLAKE_USER = "svc_etl"
+# SNOWFLAKE_PASSWORD="oB!nF5L7$h3ED?NRDh=="
+SNOWFLAKE_PASSWORD = os.getenv("SNOWFLAKE_PASSWORD")
+SNOWFLAKE_WAREHOUSE = "compute_wh"
+SNOWFLAKE_DATABASE = "raw"
+SNOWFLAKE_SCHEMA = "welcome_home"
 
-# ANSI color codes for terminal output
-GREEN = '\033[92m'
-RESET = '\033[0m'
-
-# Define all tables to process
-TABLES = [
+# WelcomeHome API details
+API_BASE_URL = "https://crm.welcomehomesoftware.com/api/exports/community/all/table"
+# API_TOKEN = "UuLdq9P2iVkeLgDtfVGBe8odtc4xEs4Q"
+API_TOKEN = os.getenv("WELCOME_HOME_API_KEY") # Assuming you have a token
+TABLES_TO_PROCESS = [
+    "Organizations",
+    "Referrers",
+    "Influencers",
+    "Units",
+    "HousingContracts",
+    "DepositTransactions",
+    "MarketingTouchpoints",
+    "ServiceAgreements",
+    "Traits",
     "Prospects",
     "Residents",
     "Activities",
-    "DepositTransactions",
 ]
 
-
-def colorize_table_name(table_name: str) -> str:
-    """Add green color to table name for terminal output"""
-    return f"{GREEN}{table_name}{RESET}"
-
-
-def camel_to_snake_case(name: str) -> str:
-    """Convert CamelCase to snake_case"""
-    import re
-    # Insert underscore before uppercase letters that follow lowercase letters or digits
+def to_snake_case(name):
+    """Converts a PascalCase string to snake_case."""
     s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-    # Insert underscore before uppercase letters that follow lowercase letters
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
+def blue_text(text):
+    """Returns text formatted in blue color for terminal output."""
+    return f"\033[34m{text}\033[0m"
 
-def api_download_and_upload(table_name: str, config: Dict) -> bool:
-    """Download table data from API and upload to Azure Blob Storage.
+def green_text(text):
+    """Returns text formatted in green color for terminal output."""
+    return f"\033[32m{text}\033[0m"
 
-    Args:
-        table_name: Name of the table to process
-        config: Configuration dictionary with API and Azure details
-
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    logger.info(f"Processing {colorize_table_name(table_name)} - API Download and Blob Upload")
-
-    # Create temporary directory for CSV files
-    with tempfile.TemporaryDirectory() as temp_dir:
-        logger.info(f"Using temporary directory: {temp_dir}")
-
-        # Step 1: Download CSV from API
-        logger.info("=" * 80)
-        logger.info("STEP 1: Query API endpoint and download CSV to temporary location")
-        logger.info("=" * 80)
-
-        csv_file_path = download_table_csv(
-            table_name=table_name,
-            api_key=config['WelcomeHome']['api_key'],
-            temp_dir=temp_dir
-        )
-
-        if not csv_file_path:
-            logger.error(f"Failed to download CSV from API for table: {colorize_table_name(table_name)}")
-            return False
-
-        # Verify file exists and has content
-        if not os.path.exists(csv_file_path):
-            logger.error(f"CSV file does not exist: {csv_file_path}")
-            return False
-
-        file_size = os.path.getsize(csv_file_path)
-        logger.info(f"Downloaded and processed CSV file size: {file_size} bytes")
-
-        if file_size == 0:
-            logger.warning(f"CSV file is empty for table: {colorize_table_name(table_name)}")
-            return False
-
-        # Step 2: Upload to Azure Blob Storage
-        logger.info("=" * 80)
-        logger.info("STEP 2: Upload CSV to blob storage from temporary location")
-        logger.info("=" * 80)
-
-        azure_config = {
-            'connection_string': config['Azure']['connection_string'],
-            'container_name': config['Azure']['container_name'],
-            'blob_name': f"{table_name.lower()}.csv"
-        }
-
-        success = upload_to_azure_blob(
-            azure_config=azure_config,
-            local_file=csv_file_path
-        )
-
-        if not success:
-            logger.error(f"Failed to upload CSV to blob storage for table: {colorize_table_name(table_name)}")
-            return False
-
-    logger.info(f"API download and blob upload completed successfully for {colorize_table_name(table_name)}")
-    return True
-
-
-def snowflake_load(table_name: str, config: Dict) -> bool:
-    """Load data from Azure Blob Storage to Snowflake.
-
-    Args:
-        table_name: Name of the table to load into Snowflake
-        config: Configuration dictionary with Snowflake details
-
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    logger.info(f"Processing {colorize_table_name(table_name)} - Snowflake Load")
-
-    logger.info("=" * 80)
-    logger.info(f"Loading data into Snowflake from stage for table: {table_name}")
-    logger.info("=" * 80)
-
-    # Get the SQL file path
-    sql_file_path = Path(__file__).parent / "sql" / f"{camel_to_snake_case(table_name)}.sql"
-
-    if not sql_file_path.exists():
-        logger.warning(f"SQL file not found: {sql_file_path}")
-        logger.info("To complete the pipeline, create the appropriate SQL file and execute it in Snowflake")
-        return False
-
-    logger.info(f"SQL file available at: {sql_file_path}")
-
-    # Option to load data directly to Snowflake if configured
-    if not config.get('Snowflake'):
-        logger.warning("Snowflake configuration missing - cannot load data")
-        return False
-
+def get_snowflake_connection():
+    """Establishes a connection to Snowflake."""
     try:
-        # Create azure_config, it's no longer passed in
-        azure_config = {
-            'connection_string': config['Azure']['connection_string'],
-            'container_name': config['Azure']['container_name'],
-            'blob_name': f"{table_name.lower()}.csv"
-        }
-
-        snowflake_config = {
-            'user': config['Snowflake']['user'],
-            'password': config['Snowflake']['password'],
-            'account': config['Snowflake']['account'],
-            'warehouse': config['Snowflake']['warehouse'],
-            'database': config['Snowflake']['database'],
-            'schema': config['Snowflake']['schema'],
-            'table_name': table_name.lower(),
-            'stage_name': config['Snowflake']['stage_name']
-        }
-
-        load_success = load_data_to_snowflake(
-            snowflake_config=snowflake_config,
-            azure_config=azure_config,
-            file_path=str(sql_file_path)
+        conn = snowflake.connector.connect(
+            user=SNOWFLAKE_USER,
+            password=SNOWFLAKE_PASSWORD,
+            account=SNOWFLAKE_ACCOUNT,
+            warehouse=SNOWFLAKE_WAREHOUSE,
+            database=SNOWFLAKE_DATABASE,
+            schema=SNOWFLAKE_SCHEMA
         )
-
-        if load_success:
-            logger.info(f"Data loaded successfully into snowflake table: {colorize_table_name(table_name)}")
-            return True
-        else:
-            logger.error(f"Failed to load data to Snowflake for table: {colorize_table_name(table_name)}")
-            return False
-
+        return conn
     except Exception as e:
-        logger.error(f"Snowflake load failed: {str(e)}")
-        logger.info("Please execute the SQL file manually in Snowflake")
-        return False
+        logging.error(f"Error connecting to Snowflake: {e}")
+        return None
 
-
-def main():
-    """Main function to orchestrate the Welcome Home data export process."""
-    logger.info("=" * 100)
-    logger.info("WELCOME HOME DATA EXPORT PIPELINE STARTING")
-    logger.info("=" * 100)
-
-    try:
-        # Load configuration
-        config_path = Path(__file__).parent / "config.ini"
-        config = load_config(str(config_path))
-
-        # Validate required configuration
-        if not config.get('WelcomeHome', {}).get('api_key'):
-            logger.error("Welcome Home API key not configured. Please set WELCOME_HOME_API_KEY in .env file.")
-            return 1
-
-        if not config.get('Azure', {}).get('connection_string'):
-            logger.error("Azure connection string not configured. Please set AZURE_CONNECTION_STRING in .env file.")
-            return 1
-
-        if not config.get('Snowflake'):
-            logger.error("Snowflake configuration not found. Please check your config.ini file.")
-            return 1
-
-        # Process all tables
-        successful_tables = []
-        failed_tables = []
-        
-        for table_name in TABLES:
-            logger.info("\n" + "=" * 120)
-            logger.info(f"PROCESSING TABLE: {colorize_table_name(table_name)}")
-            logger.info("=" * 120)
+def fetch_all_ids_from_api(table_name, records_per_page=10000):
+    """Fetches all record IDs from a given API table, handling pagination."""
+    all_ids = []
+    url = f"{API_BASE_URL}/{table_name}?limit={records_per_page}"
+    headers = {
+        "Authorization": f"Bearer {API_TOKEN}",
+        "Accept": "application/json"
+    }
+    
+    page_number = 1
+    logging.info(f"Starting data fetch for table: {blue_text(table_name)}")
+    
+    while url:
+        try:
+            response = requests.get(url, headers=headers)
             
+            response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
+            
+            # Log response content for debugging
+            response_text = response.text
+            
+            if not response_text.strip():
+                logging.error(f"  - Empty response from API for {table_name}")
+                return []
+            
+            # Parse CSV data
             try:
-                # Step 1: API Download and Blob Upload
-                upload_success = api_download_and_upload(table_name, config)
-
-                # Step 2: Snowflake Load (if upload was successful)
-                if upload_success:
-                    load_success = snowflake_load(table_name, config)
-                    if load_success:
-                        successful_tables.append(table_name)
-                    else:
-                        failed_tables.append(table_name)
+                df = pd.read_csv(StringIO(response_text))
+                
+                # Look for the {table_name}.id column
+                snake_case_table = to_snake_case(table_name)
+                expected_id_column = f"{snake_case_table}.id"
+                
+                if expected_id_column in df.columns:
+                    id_column = expected_id_column
+                    logging.info(f"  - Found expected ID column: {id_column}")
                 else:
-                    # If upload failed, the whole process for the table fails
-                    failed_tables.append(table_name)
+                    # Fallback to first column if expected column not found
+                    id_column = df.columns[0]
+                    logging.warning(f"  - Expected ID column '{expected_id_column}' not found. Using first column as fallback: {id_column}")
+                
+                # Extract IDs, filtering out null values
+                ids = df[id_column].dropna().tolist()
+                all_ids.extend(ids)
+                logging.info(f"  - Page {page_number}: Fetched {len(ids)} records")
+                page_number += 1
+                
+            except Exception as csv_error:
+                logging.error(f"  - Error parsing CSV for {table_name}: {csv_error}")
+                return []
 
-            except Exception as e:
-                logger.error(f"Error processing table {colorize_table_name(table_name)}: {str(e)}")
-                failed_tables.append(table_name)
-        
-        # Summary
-        logger.info("\n" + "=" * 100)
-        logger.info("PIPELINE COMPLETED")
-        logger.info("=" * 100)
-        
-        if successful_tables:
-            logger.info(f"Successfully processed {len(successful_tables)} tables: {', '.join(successful_tables)}")
-        
-        if failed_tables:
-            logger.error(f"Failed to process {len(failed_tables)} tables: {', '.join(failed_tables)}")
-        
-        if not failed_tables:
-            logger.info("All tables processed successfully!")
-            return 0
-        else:
-            logger.error(f"Pipeline completed with {len(failed_tables)} failures.")
-            return 1
+            # Handle pagination
+            if 'Link' in response.headers and 'rel="next"' in response.headers['Link']:
+                url = response.headers['Link'].split(';')[0].strip('<>')
+            else:
+                url = None # No more pages
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error fetching data for {table_name}: {e}")
+            return [] # Return empty list on error
+
+    logging.info(f"Finished fetching for {blue_text(table_name)}. Total IDs: {len(all_ids)}")
+    return all_ids
+
+def create_table_and_load_data(connection, table_name, ids):
+    """Creates a table in Snowflake and loads the data using pandas for optimal performance."""
+    snowflake_table_name = to_snake_case(table_name)
+    
+    # Get current EST time
+    est_tz = pytz.timezone('US/Eastern')
+    load_timestamp = datetime.now(est_tz)
+
+    try:
+        # 1. Create or replace table structure
+        cursor = connection.cursor()
+        create_table_query = f"""
+        CREATE OR REPLACE TABLE {snowflake_table_name} (
+            id NUMBER,
+            load_dts TIMESTAMP_NTZ
+        );
+        """
+        cursor.execute(create_table_query)
+        logging.info(f"Table '{blue_text(snowflake_table_name)}' created or replaced.")
+        cursor.close()
+
+        # 2. Load data using pandas DataFrame and write_pandas for optimal performance
+        if ids:
+            # Create pandas DataFrame with uppercase column names to match Snowflake identifiers
+            # Convert datetime to string format for Snowflake TIMESTAMP_NTZ compatibility
+            load_timestamp_str = load_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            df = pd.DataFrame({
+                'ID': ids,
+                'LOAD_DTS': [load_timestamp_str] * len(ids)
+            })
             
-    except Exception as e:
-        logger.error(f"Pipeline failed with error: {str(e)}")
-        return 1
+            # Use write_pandas to load data efficiently (replaces existing data)
+            success, nchunks, nrows, _ = write_pandas(
+                conn=connection,
+                df=df,
+                table_name=snowflake_table_name.upper(),  # Snowflake expects uppercase table names
+                overwrite=True  # This replaces all existing data
+            )
+            
+            if success:
+                logging.info(f"{green_text('SUCCESSFULLY LOADED')} {nrows} records into '{blue_text(snowflake_table_name)}' using pandas (processed in {nchunks} chunks).")
+            else:
+                logging.error(f"Failed to load data into '{blue_text(snowflake_table_name)}' using pandas.")
+        else:
+            logging.info(f"{green_text('No new data to load')} for '{blue_text(snowflake_table_name)}'.")
 
+    except Exception as e:
+        logging.error(f"Error during Snowflake operation for table {blue_text(snowflake_table_name)}: {e}")
+        raise  # Re-raise the exception to stop processing
+
+def main(specific_tables=None):
+    """Main function to orchestrate the data pipeline."""
+    conn = get_snowflake_connection()
+    if not conn:
+        return
+
+    # Valid table names
+    valid_tables = ["Organizations", "Referrers", "Influencers", "Units", "HousingContracts", "DepositTransactions", "MarketingTouchpoints", "ServiceAgreements", "Traits", "Prospects", "Residents", "Activities"]
+
+    try:
+        # If specific tables are provided, process only those tables
+        # Otherwise, process all tables in TABLES_TO_PROCESS
+        if specific_tables:
+            # Parse comma-separated table names and strip whitespace
+            tables_to_run = [table.strip() for table in specific_tables.split(',')]
+            
+            # Validate all table names
+            for table in tables_to_run:
+                if table not in valid_tables:
+                    logging.error(f"Invalid table name: '{table}'. Valid tables are: {', '.join(valid_tables)}")
+                    sys.exit(1)
+        else:
+            tables_to_run = TABLES_TO_PROCESS
+        
+        logging.info(f"Processing {len(tables_to_run)} table(s): {', '.join(tables_to_run)}")
+        
+        for table in tables_to_run:
+            logging.info(f"Processing table: {blue_text(table)}")
+            ids = fetch_all_ids_from_api(table)
+            if ids:
+                create_table_and_load_data(conn, table, ids)  # Pass connection instead of cursor
+            logging.info("---")
+    finally:
+        conn.close()
+        logging.info("Snowflake connection closed.")
 
 if __name__ == "__main__":
-    exit_code = main()
-    sys.exit(exit_code)
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description='Process Welcome Home data tables',
+        epilog='Examples:\n'
+               '  python main.py                    # Process all tables\n'
+               '  python main.py Prospects          # Process single table\n'
+               '  python main.py "Prospects,Activities,Units"  # Process multiple tables\n',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('tables', nargs='?', help='Specific table(s) to process. Can be a single table or comma-separated list (e.g., "Prospects,Activities")')
+    args = parser.parse_args()
+    
+    if not SNOWFLAKE_PASSWORD:
+        logging.error("Error: SNOWFLAKE_PASSWORD must be set in the .env file.")
+        sys.exit(1)
+    if not API_TOKEN:
+        logging.error("Error: WELCOME_HOME_API_TOKEN must be set in the .env file.")
+        sys.exit(1)
+    
+    # Run main function with optional table argument(s)
+    if args.tables:
+        main(args.tables)
+    else:
+        logging.info("Processing all tables")
+        main()

@@ -2,8 +2,8 @@ name: Welcome Home Pipeline
 
 on:
   schedule:
-    # Run daily at 00:15 EST (05:15 UTC)
-    - cron: '15 5 * * *'
+    # Run daily at 2:00 AM EST (7:00 AM UTC)
+    - cron: '0 7 * * *'
   workflow_dispatch:
     # Allow manual triggering with optional table selection
     inputs:
@@ -12,15 +12,6 @@ on:
         required: false
         type: string
         default: ''
-      step_type:
-        description: 'Step type to run'
-        required: false
-        default: 'both'
-        type: choice
-        options:
-          - 'both'
-          - 'api_blob_only'
-          - 'snowflake_only'
 
 jobs:
   process-table:
@@ -30,7 +21,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        table: ["Prospects", "Residents", "Activities", "DepositTransactions"]
+        table: [
+          "Organizations",
+          "Referrers", 
+          "Influencers",
+          "Units",
+          "HousingContracts",
+          "DepositTransactions",
+          "MarketingTouchpoints",
+          "ServiceAgreements",
+          "Traits",
+          "Prospects",
+          "Residents",
+          "Activities"
+        ]
 
     steps:
       - name: Checkout repository
@@ -46,45 +50,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Step 1 - Download from API and Upload to Azure Blob
-        id: api_blob
-        # The 'if' condition is now on the step, where the 'matrix' context is available.
-        if: ${{ (github.event.inputs.tables == '' || contains(github.event.inputs.tables, matrix.table)) && github.event.inputs.step_type != 'snowflake_only' }}
+      - name: Process table ${{ matrix.table }}
+        if: ${{ github.event.inputs.tables == '' || contains(github.event.inputs.tables, matrix.table) }}
         env:
           WELCOME_HOME_API_KEY: ${{ secrets.WELCOME_HOME_API_KEY }}
-          AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
         run: |
-          python -c "
-          import sys, os
-          sys.path.insert(0, os.getcwd())
-          from main import api_download_and_upload
-          from utils.config_utils import load_config
-          config = load_config('config.ini')
-          success = api_download_and_upload('${{ matrix.table }}', config)
-          if not success:
-              sys.exit(1)
-          "
-
-      - name: Step 2 - Load from Azure Blob to Snowflake
-        id: snowflake
-        # The 'if' condition is now on the step, combined with the original step logic.
-        if: ${{ (github.event.inputs.tables == '' || contains(github.event.inputs.tables, matrix.table)) && github.event.inputs.step_type != 'api_blob_only' && (steps.api_blob.outcome == 'success' || github.event.inputs.step_type == 'snowflake_only') }}
-        env:
-          WELCOME_HOME_API_KEY: ${{ secrets.WELCOME_HOME_API_KEY }}
-          AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-        run: |
-          python -c "
-          import sys, os
-          sys.path.insert(0, os.getcwd())
-          from main import snowflake_load
-          from utils.config_utils import load_config
-          config = load_config('config.ini')
-          success = snowflake_load('${{ matrix.table }}', config)
-          if not success:
-              sys.exit(1)
-          "
+          python main.py ${{ matrix.table }}
 
       - name: Upload logs for ${{ matrix.table }}
         uses: actions/upload-artifact@v4
