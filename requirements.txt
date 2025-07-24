@@ -13,7 +13,8 @@ pandas
 
 # Snowflake connector for database operations
 # Include pandas extra to support pandas_tools
-snowflake-connector-python[pandas]
+# snowflake-connector-python[pandas]
+snowflake-connector-python
 
 # Timezone handling
 pytz
