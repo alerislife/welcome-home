@@ -32,7 +32,7 @@ SNOWFLAKE_USER = "svc_etl"
 SNOWFLAKE_PASSWORD = os.getenv("SNOWFLAKE_PASSWORD")
 SNOWFLAKE_WAREHOUSE = "compute_wh"
 SNOWFLAKE_DATABASE = "raw"
-SNOWFLAKE_SCHEMA = "welcome_home"
+SNOWFLAKE_SCHEMA = "welcome_home_export"
 
 # WelcomeHome API details
 API_BASE_URL = "https://crm.welcomehomesoftware.com/api/exports/community/all/table"
