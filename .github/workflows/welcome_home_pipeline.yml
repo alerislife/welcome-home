@@ -5,18 +5,63 @@ on:
     # Run daily at 2:00 AM EST (7:00 AM UTC)
     - cron: '0 7 * * *'
   workflow_dispatch:
-    # Allow manual triggering with optional table selection
+    # Allow manual triggering with granular job control
     inputs:
+      run_prospects_pipeline:
+        description: 'Run the prospects pipeline job'
+        required: false
+        type: boolean
+        default: true
+      run_export_tables:
+        description: 'Run the export tables job'
+        required: false  
+        type: boolean
+        default: true
       tables:
-        description: 'Comma-separated list of tables to process (e.g., Prospects,Activities). Leave empty for all.'
+        description: 'Specific export tables to process (e.g., Prospects,Activities). Leave empty to run ALL export tables.'
         required: false
         type: string
         default: ''
 
 jobs:
-  process-table:
-    # The 'if' condition was removed from here.
+  process-prospects-pipeline:
     runs-on: ubuntu-latest
+    # Run prospects pipeline if enabled (default true for scheduled runs, user-controlled for manual runs)
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.run_prospects_pipeline == 'true' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Process prospects pipeline
+        env:
+          WELCOME_HOME_API_KEY: ${{ secrets.WELCOME_HOME_API_KEY }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+        run: |
+          python welcome_home/main.py
+
+      - name: Upload prospects pipeline logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-prospects-pipeline
+          path: welcome_home_pipeline_*.log
+          retention-days: 7
+
+  process-export-tables:
+    runs-on: ubuntu-latest
+    # Run export tables if enabled (default true for scheduled runs, user-controlled for manual runs)
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.run_export_tables == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -49,18 +94,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Process table ${{ matrix.table }}
+      - name: Process export table ${{ matrix.table }}
+        # Run if no specific tables specified (run all) or if this table is in the specified list
         if: ${{ github.event.inputs.tables == '' || contains(github.event.inputs.tables, matrix.table) }}
         env:
           WELCOME_HOME_API_KEY: ${{ secrets.WELCOME_HOME_API_KEY }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
         run: |
-          python main.py ${{ matrix.table }}
+          python welcome_home_export/main.py ${{ matrix.table }}
 
-      - name: Upload logs for ${{ matrix.table }}
+      - name: Upload logs for export table ${{ matrix.table }}
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: logs-${{ matrix.table }}
+          name: logs-export-${{ matrix.table }}
           path: welcome_home_pipeline_*.log
           retention-days: 7
