@@ -24,39 +24,39 @@ on:
         default: ''
 
 jobs:
-  process-prospects-pipeline:
-    runs-on: ubuntu-latest
-    # Run prospects pipeline if enabled (default true for scheduled runs, user-controlled for manual runs)
-    if: ${{ github.event_name == 'schedule' || github.event.inputs.run_prospects_pipeline == 'true' }}
+  # process-prospects-pipeline:
+  #   runs-on: ubuntu-latest
+  #   # Run prospects pipeline if enabled (default true for scheduled runs, user-controlled for manual runs)
+  #   if: ${{ github.event_name == 'schedule' || github.event.inputs.run_prospects_pipeline == 'true' }}
     
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v4
+  #       with:
+  #         python-version: '3.10'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+  #     - name: Install dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install -r requirements.txt
 
-      - name: Process prospects pipeline
-        env:
-          WELCOME_HOME_API_KEY: ${{ secrets.WELCOME_HOME_API_KEY }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-        run: |
-          python welcome_home/main.py
+  #     - name: Process prospects pipeline
+  #       env:
+  #         WELCOME_HOME_API_KEY: ${{ secrets.WELCOME_HOME_API_KEY }}
+  #         SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+  #       run: |
+  #         python welcome_home/main.py
 
-      - name: Upload prospects pipeline logs
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: logs-prospects-pipeline
-          path: welcome_home_pipeline_*.log
-          retention-days: 7
+  #     - name: Upload prospects pipeline logs
+  #       uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: logs-prospects-pipeline
+  #         path: welcome_home_pipeline_*.log
+  #         retention-days: 7
 
   process-export-tables:
     runs-on: ubuntu-latest
